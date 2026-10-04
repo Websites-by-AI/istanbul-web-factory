@@ -1,0 +1,12 @@
+# Optional local Worker secrets. Copy to .dev.vars; never commit actual values.
+# HF_TOKEN needs the Hugging Face Inference Providers permission.
+HF_TOKEN=
+
+# Worker admin login. Use a strong, unique password and a random SESSION_SECRET (32+ bytes).
+ADMIN_PASSWORD=
+SESSION_SECRET=
+
+# Optional Gemini fallback; Hugging Face is preferred when HF_TOKEN is configured.
+GEMINI_API_KEY=
+# Google Places results are live/transient and subject to Google policies.
+GOOGLE_PLACES_API_KEY=

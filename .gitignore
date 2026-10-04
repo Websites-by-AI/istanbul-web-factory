@@ -1,0 +1,7 @@
+.env
+node_modules/
+.wrangler/
+_site/
+.dev.vars
+data/store.json
+*.log
