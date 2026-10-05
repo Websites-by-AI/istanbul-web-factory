@@ -19,8 +19,8 @@ Demo işletmeler ve keşif sonuçları **sentetiktir**; gerçek işletme veya Go
 ## Teknoloji ve çalışma modları
 
 - **Yerel Node modu:** `server.mjs` ve `data/store.json`; yalnızca yerel geliştirme ve UI denemeleri için. Yönetici girişi yoktur; internete açmayın.
-- **Cloudflare modu:** `worker/index.mjs`, Workers Static Assets ve D1. Worker API'sinde ortak yönetici parolası, 12 saatlik imzalı oturum, D1 tabanlı istek limitleri ve GitHub Pages için izin listeli CORS vardır.
-- **GitHub Pages:** public frontend'in statik kopyasıdır; D1/API ve önizlemeler Cloudflare Worker'da kalır. Worker URL'si Pages build sırasında konfigüre edilir. GitHub Pages'te gizli anahtar bulunmaz.
+- **Cloudflare modu:** `worker/index.mjs`, Workers Static Assets ve Workers KV (`STORE`). Worker API'sinde ortak yönetici parolası, 12 saatlik imzalı oturum, KV tabanlı istek limitleri ve GitHub Pages için izin listeli CORS vardır.
+- **GitHub Pages:** public frontend'in statik kopyasıdır; KV/API ve önizlemeler Cloudflare Worker'da kalır. Worker URL'si Pages build sırasında konfigüre edilir. GitHub Pages'te gizli anahtar bulunmaz.
 - **AI:** Hugging Face Inference API Worker tarafından sunucu tarafında çağrılır; ayrı bir Hugging Face Space bu entegrasyon için gerekli değildir. İstersen daha sonra bağımsız bir Space eklenebilir.
 
 ## Yerel Node modunda çalıştırma
@@ -33,12 +33,11 @@ npm run dev
 
 `http://localhost:4173` adresini açın. İlk çalıştırmada yerel JSON deposunda sentetik demo kayıtları oluşturulur. Node modu giriş doğrulaması yapmaz.
 
-## Cloudflare Worker + D1 — yerel deneme
+## Cloudflare Worker + KV — yerel deneme
 
-İlk kullanımda `npx` Wrangler internetten indirilir. Önce migration'ları çalıştırıp D1 tablolarını oluşturun, sonra Worker'ı başlatın:
+İlk kullanımda `npx` Wrangler internetten indirilir. KV yerelde Wrangler tarafından simüle edilir:
 
 ```bash
-npm run d1:migrate:local
 npm run dev:worker
 ```
 
@@ -64,15 +63,15 @@ Kaynaklar: [Hugging Face Inference Providers — Chat Completion](https://huggin
 
 Hedef depo: `website_by_ai/istanbul-web-factory`. Yerel proje klasörü henüz Git deposu değil; uzaktaki depo oluşturulmadı ve dağıtım yapılmadı. Kurulumu depo sahibi/organizasyon yöneticisi tamamlamalıdır.
 
-### 1. D1 veritabanını oluşturun
+### 1. KV namespace oluşturun
 
 Cloudflare hesabında proje kökünden çalıştırın:
 
 ```bash
-npm run d1:create
+npx wrangler@latest kv namespace create STORE
 ```
 
-Dönen veritabanı kimliğini `wrangler.jsonc` içindeki `d1_databases[0].database_id` alanına yazın. Dosyadaki sıfır UUID yalnızca yerel geliştirme içindir; gerçek ID girilmeden **remote migration veya deploy çalıştırmayın**. `database_name` değerini `istanbul-web-factory` olarak bırakın.
+Dönen kimliği `wrangler.jsonc` içindeki `kv_namespaces[0].id` alanına yazın.
 
 ### 2. Cloudflare Worker sırlarını girin
 
@@ -105,7 +104,7 @@ git remote add origin git@github.com:website_by_ai/istanbul-web-factory.git
 git push -u origin main
 ```
 
-Proje dizininde `.git` veya `origin` sonradan oluşmuşsa yeniden `git init`/`git remote add` çalıştırmadan önce `git status` ve `git remote -v` ile kontrol edin. `.github/workflows/deploy-worker.yml`, `main` dalına push edildiğinde sırasıyla D1 migration'larını remote'a uygular ve Worker'ı deploy eder.
+Proje dizininde `.git` veya `origin` sonradan oluşmuşsa yeniden `git init`/`git remote add` çalıştırmadan önce `git status` ve `git remote -v` ile kontrol edin. `.github/workflows/deploy-worker.yml`, `main` dalına push edildiğinde Worker'ı deploy eder.
 
 ### 4. GitHub Pages'i açın
 
@@ -118,7 +117,7 @@ GitHub deposunda **Settings → Pages → Build and deployment → Source: GitHu
 ## Erişim ve güvenlik sınırları
 
 - Worker'da admin API'si login olmadan CRM verisi veya lead/site listesi döndürmez. Login parolası açık metin olarak depolanmaz; imzalı bearer oturumu tarayıcı `sessionStorage` içinde tutulur ve 12 saat sonra sona erer. Tek ortak admin parolası vardır; çok kullanıcılı rol/SSO sistemi değildir.
-- D1 tabanlı istek limitleri login için 10 deneme/15 dakika, yazma API'leri için 300/saat, Google Places keşfi için 30/gün ve AI site taslağı için 25/gündür. İstemci IP'si ham olarak saklanmaz; limit için hash kullanılır. Sağlayıcı kotası/ücreti ayrıca takip edilmelidir.
+- KV tabanlı istek limitleri login için 10 deneme/15 dakika, yazma API'leri için 300/saat, Google Places keşfi için 30/gün ve AI site taslağı için 25/gündür. İstemci IP'si ham olarak saklanmaz; limit için hash kullanılır. Sağlayıcı kotası/ücreti ayrıca takip edilmelidir.
 - Paylaşılabilir önizleme URL'sini bilen herkes taslak içeriğini görebilir. Linkler noindex'tir ve yüksek rastgele slug kullanır; yine de gizli/kişisel veri eklemeyin, gerçek kullanımda erişim/süre sonu/silme akışı ekleyin.
 - Local Node modu auth içermez; `server.mjs` production hosting hedefi değildir. Worker secrets yoksa korumalı Worker API login'i kapatır ve veriyi açmaz.
 - Herkese açık dağıtımdan önce auth/rate-limit kodunu güvenlik incelemesinden geçirin; KVKK, ticari ileti/İYS, izin kanıtı, geri çekme/silme ve veri saklama sürelerini uzmanla değerlendirin.

@@ -2,6 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "istanbul-web-factory",
   "main": "worker/index.mjs",
+  "account_id": "88b6e2481cef2473409fdf549c56a54d",
   "compatibility_date": "2026-10-04",
   "workers_dev": true,
   "assets": {
@@ -9,19 +10,17 @@
     "binding": "ASSETS",
     "run_worker_first": ["/api/*", "/preview/*"]
   },
-  "d1_databases": [
+  "kv_namespaces": [
     {
-      "binding": "DB",
-      "database_name": "istanbul-web-factory",
-      // Local Wrangler uses this placeholder; replace with the real ID before remote migration/deploy.
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
+      "binding": "STORE",
+      "id": "148cb4ef2fd546ae86763637ae407a01"
     }
   ],
   "vars": {
     "GEMINI_MODEL": "gemini-flash-latest",
     "HF_MODEL": "Qwen/Qwen3-4B-Instruct-2507:fastest",
-    "ALLOWED_ORIGINS": ""
+    "ALLOWED_ORIGINS": "https://websites-by-ai.github.io",
+    "PUBLIC_BASE_URL": "https://istanbul-web-factory.aykanet34.workers.dev"
   },
   "observability": {
     "enabled": true

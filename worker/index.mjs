@@ -83,46 +83,69 @@ function demoLead([id, name, industryId, district, website, stage]) {
     contactConsent: false, consentAt: null, source: 'demo', demo: true, notes: '', createdAt: new Date().toISOString(), siteSlug: null,
   };
 }
-function leadFromRow(row) { try { return JSON.parse(row.data); } catch { return null; } }
+function requireStore(env) {
+  if (!env.STORE) throw fail(503, 'KV STORE binding eksik.');
+  return env.STORE;
+}
+async function readJsonValue(env, key) {
+  const raw = await requireStore(env).get(key);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+async function writeJsonValue(env, key, value) {
+  await requireStore(env).put(key, JSON.stringify(value));
+}
+async function listByPrefix(env, prefix) {
+  const kv = requireStore(env);
+  const items = [];
+  let cursor;
+  do {
+    const page = await kv.list({ prefix, cursor });
+    for (const entry of page.keys) {
+      const value = await readJsonValue(env, entry.name);
+      if (value) items.push(value);
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return items;
+}
+function sortByCreatedAt(items) {
+  return items.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || String(a.id || '').localeCompare(String(b.id || '')));
+}
 async function ensureDemoSeed(env) {
-  const marker = await env.DB.prepare('SELECT value FROM app_meta WHERE key = ?').bind('demo_seed_v1').first();
-  if (marker) return;
+  const kv = requireStore(env);
+  if (await kv.get('meta:demo_seed_v1')) return;
   const now = new Date().toISOString();
-  const statements = DEMO_ROWS.map(row => {
-    const lead = demoLead(row); lead.createdAt = now;
-    return env.DB.prepare('INSERT OR IGNORE INTO leads (id, created_at, updated_at, data) VALUES (?, ?, ?, ?)').bind(lead.id, now, now, JSON.stringify(lead));
-  });
-  statements.push(env.DB.prepare('INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, ?)').bind('demo_seed_v1', '1'));
-  await env.DB.batch(statements);
+  await Promise.all(DEMO_ROWS.map(row => {
+    const lead = demoLead(row);
+    lead.createdAt = now;
+    lead.updatedAt = now;
+    return kv.put(`lead:${lead.id}`, JSON.stringify(lead));
+  }));
+  await kv.put('meta:demo_seed_v1', '1');
 }
 async function listLeads(env) {
   await ensureDemoSeed(env);
-  const { results=[] } = await env.DB.prepare('SELECT data FROM leads ORDER BY created_at DESC, id ASC').all();
-  return results.map(leadFromRow).filter(Boolean);
+  return sortByCreatedAt(await listByPrefix(env, 'lead:'));
 }
 async function getLead(env, id) {
   await ensureDemoSeed(env);
-  const row = await env.DB.prepare('SELECT data FROM leads WHERE id = ?').bind(id).first();
-  return row ? leadFromRow(row) : null;
+  return readJsonValue(env, `lead:${id}`);
 }
 async function saveLead(env, lead) {
   const now = new Date().toISOString();
   lead.updatedAt = now;
-  await env.DB.prepare('INSERT INTO leads (id, created_at, updated_at, data) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at, data=excluded.data')
-    .bind(lead.id, lead.createdAt || now, now, JSON.stringify(lead)).run();
+  if (!lead.createdAt) lead.createdAt = now;
+  await writeJsonValue(env, `lead:${lead.id}`, lead);
 }
 async function listSites(env) {
-  const { results=[] } = await env.DB.prepare('SELECT data FROM sites ORDER BY created_at DESC, id ASC').all();
-  return results.map(row => { try { return JSON.parse(row.data); } catch { return null; } }).filter(Boolean);
+  return sortByCreatedAt(await listByPrefix(env, 'site:'));
 }
 async function getSite(env, slug) {
-  const row = await env.DB.prepare('SELECT data FROM sites WHERE slug = ?').bind(slug).first();
-  if (!row) return null;
-  try { return JSON.parse(row.data); } catch { return null; }
+  return readJsonValue(env, `site:${slug}`);
 }
 async function saveSite(env, site) {
-  await env.DB.prepare('INSERT INTO sites (id, slug, created_at, data) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET slug=excluded.slug, data=excluded.data')
-    .bind(site.id, site.slug, site.createdAt, JSON.stringify(site)).run();
+  await writeJsonValue(env, `site:${site.slug}`, site);
 }
 async function readJson(request) {
   const size = Number(request.headers.get('content-length') || 0);
@@ -174,9 +197,11 @@ async function constantTimePasswordMatch(provided, expected) {
 }
 async function rateLimit(env, key, limit, windowMs) {
   const now = Date.now(), windowStart = Math.floor(now / windowMs) * windowMs;
-  await env.DB.prepare('INSERT INTO rate_limits (rate_key, window_start, request_count) VALUES (?, ?, 1) ON CONFLICT(rate_key, window_start) DO UPDATE SET request_count=request_count+1').bind(key, windowStart).run();
-  const row = await env.DB.prepare('SELECT request_count FROM rate_limits WHERE rate_key = ? AND window_start = ?').bind(key, windowStart).first();
-  if (Number(row?.request_count || 0) > limit) throw fail(429, 'İstek sınırına ulaşıldı. Bir süre sonra tekrar deneyin.');
+  const storeKey = `rate:${key}:${windowStart}`;
+  const current = Number(await requireStore(env).get(storeKey) || 0) + 1;
+  const ttl = Math.max(60, Math.ceil(windowMs / 1000) + 120);
+  await requireStore(env).put(storeKey, String(current), { expirationTtl: ttl });
+  if (current > limit) throw fail(429, 'İstek sınırına ulaşıldı. Bir süre sonra tekrar deneyin.');
 }
 async function login(request, env) {
   if (!env.ADMIN_PASSWORD || env.ADMIN_PASSWORD.length < 16 || !env.SESSION_SECRET || env.SESSION_SECRET.length < 32) {
@@ -185,7 +210,6 @@ async function login(request, env) {
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   const ipHash = await hashText(`${env.SESSION_SECRET}:${ip}`);
   await rateLimit(env, `login:${ipHash}`, 10, 15 * 60 * 1000);
-  await env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(Date.now() - 2 * 24 * 60 * 60 * 1000).run();
   const body = await readJson(request), password = String(body.password || '').slice(0, 256);
   if (!await constantTimePasswordMatch(password, env.ADMIN_PASSWORD)) throw fail(401, 'Giriş bilgileri geçersiz.');
   const now = Math.floor(Date.now() / 1000), expiresAt = now + 12 * 60 * 60;
@@ -343,7 +367,7 @@ async function servePreview(request, env) {
 }
 async function route(request, env) {
   const url = new URL(request.url), path = url.pathname, method = request.method;
-  if (path === '/api/health' && method === 'GET') return json({ ok: true, mode: env.GOOGLE_PLACES_API_KEY ? 'places-enabled' : 'demo', runtime: 'cloudflare-worker', storage: 'D1', authRequired: true, authConfigured: Boolean(env.ADMIN_PASSWORD && env.SESSION_SECRET && env.ADMIN_PASSWORD.length >= 16 && env.SESSION_SECRET.length >= 32), placesConfigured: Boolean(env.GOOGLE_PLACES_API_KEY), geminiConfigured: Boolean(env.GEMINI_API_KEY), hfConfigured: Boolean(env.HF_TOKEN), hfModel: env.HF_MODEL || 'Qwen/Qwen3-4B-Instruct-2507:fastest' });
+  if (path === '/api/health' && method === 'GET') return json({ ok: true, mode: env.GOOGLE_PLACES_API_KEY ? 'places-enabled' : 'demo', runtime: 'cloudflare-worker', storage: 'KV', authRequired: true, authConfigured: Boolean(env.ADMIN_PASSWORD && env.SESSION_SECRET && env.ADMIN_PASSWORD.length >= 16 && env.SESSION_SECRET.length >= 32), placesConfigured: Boolean(env.GOOGLE_PLACES_API_KEY), geminiConfigured: Boolean(env.GEMINI_API_KEY), hfConfigured: Boolean(env.HF_TOKEN), hfModel: env.HF_MODEL || 'Qwen/Qwen3-4B-Instruct-2507:fastest' });
   if (path === '/api/meta' && method === 'GET') return json({ industries: INDUSTRIES, districts: DISTRICTS, stages: STAGES });
   if (path === '/api/auth/login' && method === 'POST') return login(request, env);
   if (path === '/api/auth/session' && method === 'GET') { const session = await requireAdmin(request, env); return json({ ok: true, user: session.sub, expiresAt: session.exp }); }

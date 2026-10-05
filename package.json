@@ -8,8 +8,6 @@
     "dev": "node server.mjs",
     "dev:worker": "npx wrangler@latest dev",
     "deploy:worker": "npx wrangler@latest deploy",
-    "d1:create": "npx wrangler@latest d1 create istanbul-web-factory",
-    "d1:migrate:local": "npx wrangler@latest d1 migrations apply istanbul-web-factory --local",
-    "d1:migrate:remote": "npx wrangler@latest d1 migrations apply istanbul-web-factory --remote"
+    "kv:create": "npx wrangler@latest kv namespace create STORE"
   }
 }
