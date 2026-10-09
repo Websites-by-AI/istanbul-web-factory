@@ -56,6 +56,7 @@
 .job-sample{border:1px dashed #cad9e2;border-radius:12px;padding:12px;display:grid;gap:4px;background:#fff}
 .job-sample strong{font-size:13px;text-transform:capitalize}
 .job-sample small{color:var(--muted);font-size:10px}
+.job-save-box{margin-top:18px;padding-top:14px;border-top:1px solid #e2ebf0}
 html.is-rtl .hero-copy h1,html.is-rtl .section h2,html.is-rtl .page-heading h2{letter-spacing:-.02em}
 html.is-rtl .side-link.active{box-shadow:inset -3px 0 #00a69c}
 html.is-rtl .public-links,html.is-rtl .hero-ctas,html.is-rtl .lang-switch{flex-direction:row}

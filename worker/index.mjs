@@ -147,6 +147,82 @@ async function getSite(env, slug) {
 async function saveSite(env, site) {
   await writeJsonValue(env, `site:${site.slug}`, site);
 }
+const JOB_LINK_HOSTS = ['indeed.com','linkedin.com','kariyer.net','yenibiris.com','secretcv.com','eleman.net','glassdoor.com','jooble.org','google.com','bayt.com'];
+function hostAllowed(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    return JOB_LINK_HOSTS.some(h => host === h || host.endsWith(`.${h}`));
+  } catch { return false; }
+}
+async function listJobPosts(env) {
+  return sortByCreatedAt(await listByPrefix(env, 'jobpost:'));
+}
+async function saveJobPost(env, post) {
+  await writeJsonValue(env, `jobpost:${post.id}`, post);
+}
+async function notifyTelegram(env, text) {
+  const token = String(env.TELEGRAM_BOT_TOKEN || '').trim();
+  const chat = String(env.TELEGRAM_CHAT_ID || '').trim();
+  if (!token || !chat) return { sent: false, reason: 'not-configured' };
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chat, text: String(text).slice(0, 3900), disable_web_page_preview: true }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!data.ok) throw fail(502, data.description || `Telegram yanıtı: ${response.status}`);
+  return { sent: true, messageId: data.result?.message_id || null };
+}
+function formatJobTelegram(post) {
+  const lines = [
+    post.kind === 'found' ? '📌 Kaydedilen iş ilanı' : '🔎 İstanbul iş araması',
+    post.title ? `Başlık: ${post.title}` : '',
+    post.query ? `Arama: ${post.query}` : '',
+    post.industryId ? `Sektör: ${post.industryId}` : '',
+    post.district ? `İlçe: ${post.district}` : '',
+    Array.isArray(post.skills) && post.skills.length ? `Beceriler: ${post.skills.join(', ')}` : '',
+    post.foundUrl ? `İlan: ${post.foundUrl}` : '',
+    post.notes ? `Not: ${post.notes}` : '',
+  ].filter(Boolean);
+  const links = Array.isArray(post.links) ? post.links.slice(0, 10) : [];
+  for (const link of links) if (link?.url) lines.push(`${link.id || 'kaynak'}: ${link.url}`);
+  lines.push('Kaynak: operatör kaydı · board kazıması yok.');
+  return lines.join('\n');
+}
+async function createJobPost(body, env, notify) {
+  const kind = body.kind === 'found' ? 'found' : 'search';
+  const foundUrl = cleanHttpUrl(body.foundUrl);
+  if (kind === 'found') {
+    if (!foundUrl) throw fail(400, 'Bulunan ilan için http(s) URL gerekli.');
+    if (!hostAllowed(foundUrl)) throw fail(400, 'Yalnızca Indeed, LinkedIn, Kariyer.net ve listedeki resmi board URL’leri kaydedilir.');
+  }
+  const links = Array.isArray(body.links) ? body.links.slice(0, 10).map(link => {
+    const url = cleanHttpUrl(link?.url);
+    if (!url || !hostAllowed(url)) return null;
+    return { id: cap(link.id, 40), url };
+  }).filter(Boolean) : [];
+  if (kind === 'search' && !links.length && !cap(body.query, 240)) throw fail(400, 'Kayıt için arama sorgusu veya resmi board linki gerekli.');
+  const post = {
+    id: `job-${randomHex(6)}`,
+    kind,
+    title: cap(body.title || (kind === 'found' ? 'Bulunan ilan' : 'İş araması'), 180),
+    query: cap(body.query, 240),
+    industryId: cap(body.industryId, 40),
+    district: cap(body.district, 60),
+    skills: Array.isArray(body.skills) ? body.skills.slice(0, 10).map(x => cap(x, 40)).filter(Boolean) : [],
+    foundUrl,
+    notes: cap(body.notes, 500),
+    links,
+    telegramSent: false,
+    createdAt: new Date().toISOString(),
+  };
+  let telegram = { sent: false, reason: 'skipped' };
+  if (notify) telegram = await notifyTelegram(env, formatJobTelegram(post));
+  post.telegramSent = telegram.sent === true;
+  await saveJobPost(env, post);
+  return { post, telegram };
+}
 async function readJson(request) {
   const size = Number(request.headers.get('content-length') || 0);
   if (size > 1_000_000) throw fail(413, 'İstek gövdesi çok büyük.');
@@ -367,7 +443,7 @@ async function servePreview(request, env) {
 }
 async function route(request, env) {
   const url = new URL(request.url), path = url.pathname, method = request.method;
-  if (path === '/api/health' && method === 'GET') return json({ ok: true, mode: env.GOOGLE_PLACES_API_KEY ? 'places-enabled' : 'demo', runtime: 'cloudflare-worker', storage: 'KV', authRequired: true, authConfigured: Boolean(env.ADMIN_PASSWORD && env.SESSION_SECRET && env.ADMIN_PASSWORD.length >= 16 && env.SESSION_SECRET.length >= 32), placesConfigured: Boolean(env.GOOGLE_PLACES_API_KEY), geminiConfigured: Boolean(env.GEMINI_API_KEY), hfConfigured: Boolean(env.HF_TOKEN), hfModel: env.HF_MODEL || 'Qwen/Qwen3-4B-Instruct-2507:fastest' });
+  if (path === '/api/health' && method === 'GET') return json({ ok: true, mode: env.GOOGLE_PLACES_API_KEY ? 'places-enabled' : 'demo', runtime: 'cloudflare-worker', storage: 'KV', authRequired: true, authConfigured: Boolean(env.ADMIN_PASSWORD && env.SESSION_SECRET && env.ADMIN_PASSWORD.length >= 16 && env.SESSION_SECRET.length >= 32), placesConfigured: Boolean(env.GOOGLE_PLACES_API_KEY), geminiConfigured: Boolean(env.GEMINI_API_KEY), hfConfigured: Boolean(env.HF_TOKEN), hfModel: env.HF_MODEL || 'Qwen/Qwen3-4B-Instruct-2507:fastest', telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) });
   if (path === '/api/meta' && method === 'GET') return json({ industries: INDUSTRIES, districts: DISTRICTS, stages: STAGES });
   if (path === '/api/auth/login' && method === 'POST') return login(request, env);
   if (path === '/api/auth/session' && method === 'GET') { const session = await requireAdmin(request, env); return json({ ok: true, user: session.sub, expiresAt: session.exp }); }
@@ -381,6 +457,7 @@ async function route(request, env) {
     if (['POST','PATCH','PUT','DELETE'].includes(method)) await rateLimit(env, `writes:${session.sub}`, 300, 60 * 60 * 1000);
     if (path === '/api/discover' && method === 'POST') await rateLimit(env, `discover:${session.sub}`, 30, 24 * 60 * 60 * 1000);
     if (path === '/api/sites' && method === 'POST') await rateLimit(env, `ai-drafts:${session.sub}`, 25, 24 * 60 * 60 * 1000);
+    if (path === '/api/jobs/saved' && method === 'POST') await rateLimit(env, `job-saves:${session.sub}`, 40, 24 * 60 * 60 * 1000);
   }
   if (path === '/api/leads' && method === 'GET') { const leads = await listLeads(env); return json({ ok: true, items: leads, demoCount: leads.filter(l => l.demo).length }); }
   if (path === '/api/discover' && method === 'POST') return json(await discover(await readJson(request), env));
@@ -469,6 +546,13 @@ async function route(request, env) {
     await saveSite(env, site);
     lead.siteSlug = site.slug; lead.stage = 'Önizleme hazır'; await saveLead(env, lead);
     return json({ ok: true, site, previewUrl: `/preview/${site.slug}`, generator: result.generator, disclaimer: 'Ücretsiz ilk taslak; yayın öncesi işletme sahibi doğrulamalıdır.' }, 201);
+  }
+  if (path === '/api/jobs/saved' && method === 'GET') return json({ ok: true, items: await listJobPosts(env), telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) });
+  if (path === '/api/jobs/saved' && method === 'POST') {
+    const body = await readJson(request);
+    if (body.dataRightsConfirmed !== true) throw fail(400, 'Kaydedilen arama/ilan için kaynak ve kullanım hakkını doğrulayın. Board kazıması yapılmaz.');
+    const result = await createJobPost(body, env, body.notifyTelegram !== false);
+    return json({ ok: true, item: result.post, telegram: result.telegram, disclaimer: 'Indeed/LinkedIn ilan gövdesi çekilmez; yalnızca operatörün kaydettiği arama veya yapıştırdığı resmi URL saklanır.' }, 201);
   }
   if (path === '/api/sites' && method === 'GET') return json({ ok: true, items: await listSites(env) });
   const siteMatch = path.match(/^\/api\/sites\/([^/]+)$/);

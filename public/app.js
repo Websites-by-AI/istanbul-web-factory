@@ -258,7 +258,21 @@ function jobsPanel() {
         <div class="search-mode-note">${esc(t('jobs.demoNote'))}</div>
         <div class="job-samples">${samples}</div>
         <div class="jobs-source-grid">${sources}</div>
+        ${jobsSavePanel()}
       </div></div>`;
+}
+function jobsSavePanel() {
+  const auth = state.authenticated || !state.config.authRequired;
+  const tg = !!state.config.telegramConfigured;
+  const saved = state.savedJobs || [];
+  if (!auth) return `<div class="search-mode-note" style="margin-top:14px">${esc(t('jobs.needAdmin'))} <button class="btn btn-light btn-sm" data-nav="dashboard">${esc(t('login.submit'))}</button></div>`;
+  const rows = saved.length ? saved.slice(0, 12).map(p => `<div class="job-sample"><span class="demo-label">${p.telegramSent?'TG':p.kind}</span><strong>${esc(p.title||p.query||p.id)}</strong><small>${esc((p.district||'')+' · '+(p.createdAt||'').slice(0,16))}</small>${p.foundUrl?`<a class="btn btn-ghost btn-sm" href="${esc(p.foundUrl)}" target="_blank" rel="noopener">URL</a>`:''}</div>`).join('') : `<p class="form-hint">${esc(t('jobs.saved'))}</p>`;
+  return `<div class="job-save-box"><div class="card-head"><div><h3>${esc(t('jobs.saved'))}</h3><p>${esc(tg?t('jobs.tgOn'):t('jobs.tgOff'))}</p></div></div>
+    <label class="consent-box"><input id="jobs-rights" type="checkbox"><span>${esc(t('jobs.confirmRights'))}</span></label>
+    <div class="site-actions" style="margin-top:10px"><button class="btn" id="save-job-search">${esc(t('jobs.save'))}</button><button class="btn btn-light" id="save-job-telegram">${esc(t('jobs.saveTg'))}</button></div>
+    <div class="site-form-grid" style="margin-top:14px"><div class="form-field"><label>${esc(t('jobs.foundTitle'))}</label><input class="field" id="found-title" maxlength="180"></div><div class="form-field"><label>${esc(t('jobs.foundUrl'))}</label><input class="field" id="found-url" type="url" placeholder="https://tr.indeed.com/..."></div></div>
+    <button class="btn btn-outline" style="margin-top:10px" id="save-found-job">${esc(t('jobs.foundSave'))}</button>
+    <div class="job-samples" style="margin-top:14px">${rows}</div></div>`;
 }
 function jobsPublic() {
   return `<div class="public-page">${publicHeader(`<button class="btn btn-light" data-nav="home">${esc(t('nav.home'))}</button><button class="btn" data-nav="discover">${esc(t('cta.discover'))}</button>`)}<main class="jobs-public">${jobsPanel()}</main><footer class="landing-footer"><span>${esc(t('footer.copy'))}</span><span>${esc(t('jobs.notice'))}</span></footer></div>`;
@@ -328,6 +342,34 @@ function bindJobsEvents() {
     window.open(sourceSearchUrl(JOB_SOURCES[0]), '_blank', 'noopener');
     window.open(sourceSearchUrl(JOB_SOURCES[1]), '_blank', 'noopener');
   });
+  const rights = () => $('#jobs-rights')?.checked === true;
+  $('#save-job-search')?.addEventListener('click', () => saveJobRecord({ notifyTelegram: false }));
+  $('#save-job-telegram')?.addEventListener('click', () => saveJobRecord({ notifyTelegram: true }));
+  $('#save-found-job')?.addEventListener('click', () => saveJobRecord({ kind: 'found', notifyTelegram: true }));
+  async function saveJobRecord({ kind='search', notifyTelegram=false } = {}) {
+    if (!rights()) { toast(t('jobs.confirmRights'), 'warn'); return; }
+    sync();
+    const links = JOB_SOURCES.map(s => ({ id: s.id, url: sourceSearchUrl(s) }));
+    const body = {
+      kind,
+      title: kind === 'found' ? ($('#found-title')?.value || '') : t('jobs.saved'),
+      query: jobQuery(),
+      industryId: state.jobs.industryId,
+      district: state.jobs.district,
+      skills: state.jobs.skills || [],
+      foundUrl: $('#found-url')?.value || '',
+      links: kind === 'search' ? links : [],
+      notifyTelegram,
+      dataRightsConfirmed: true,
+    };
+    try {
+      const result = await post('/api/jobs/saved', body);
+      await refreshData();
+      render();
+      if (result.telegram?.sent) toast(t('jobs.tgOk'));
+      else toast(result.telegram?.reason === 'not-configured' ? t('jobs.tgSkip') : t('jobs.savedOk'), result.telegram?.sent ? '' : 'warn');
+    } catch (err) { toast(err.message, 'error'); }
+  }
 }
 function bindViewEvents() {
   bindJobsEvents();
@@ -414,6 +456,11 @@ async function submitLogin(e) {
 async function refreshData() {
   const [leads,sites,health]=await Promise.all([api('/api/leads'),api('/api/sites'),api('/api/health')]);
   state.leads=leads.items||[];state.sites=sites.items||[];state.config=health;
+  try {
+    const jobs = await api('/api/jobs/saved');
+    state.savedJobs = jobs.items || [];
+    if (typeof jobs.telegramConfigured === 'boolean') state.config.telegramConfigured = jobs.telegramConfigured;
+  } catch { state.savedJobs = []; }
 }
 function exportCsv(rows,name) {
   const cols=['name','industry','district','website','websiteStatus','evidenceUrl','verifiedAt','auditScore','packageRecommendation','stage','contactConsent','consentAt','source'];
