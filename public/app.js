@@ -32,7 +32,7 @@ const TEMPLATES = [
 let API_BASE_URL = String(window.APP_CONFIG?.apiBaseUrl || '');
 while (API_BASE_URL.endsWith('/')) API_BASE_URL = API_BASE_URL.slice(0, -1);
 let sessionToken = sessionStorage.getItem('iwf_session') || '';
-let state = { view:new URLSearchParams(location.search).get('view') || 'home', leads:[], sites:[], config:{}, authenticated:false, discovery:[], selectedIndustries:INDUSTRIES.map(x=>x.id), selectedDistricts:[...DISTRICTS], filters:{industry:'',district:'',website:'',stage:'',q:''}, selectedTemplate:'', activeOutreachLead:'', jobs:{ q:'', industryId:'', district:'', ran:false } };
+let state = { view:new URLSearchParams(location.search).get('view') || 'home', leads:[], sites:[], config:{}, authenticated:false, discovery:[], selectedIndustries:INDUSTRIES.map(x=>x.id), selectedDistricts:[...DISTRICTS], filters:{industry:'',district:'',website:'',stage:'',q:''}, selectedTemplate:'', activeOutreachLead:'', jobs:{ q:'', industryId:'', district:'', skills:[], ran:false } };
 const LANGS = window.IWF_LANGS || [];
 const I18N = window.IWF_I18N || {};
 const RTL = new Set(LANGS.filter(l => l.dir === 'rtl').map(l => l.code));
@@ -89,18 +89,8 @@ const JOB_SOURCES = [
   { id: 'google', url: (q, loc) => `https://www.google.com/search?ibp=htl;jobs&q=${encodeURIComponent(`${q} ${loc}`)}` },
   { id: 'bayt', url: (q) => `https://www.bayt.com/en/turkey/jobs/?keyword=${encodeURIComponent(q)}&location=istanbul` },
 ];
-const DEMO_JOB_TITLES = {
-  restaurant: ['jobq.restaurant', 'industry.restaurant'],
-  cafe: ['jobq.cafe', 'industry.cafe'],
-  beauty: ['jobq.beauty', 'industry.beauty'],
-  clinic: ['jobq.clinic', 'industry.clinic'],
-  hotel: ['jobq.hotel', 'industry.hotel'],
-  'real-estate': ['jobq.real-estate', 'industry.real-estate'],
-  auto: ['jobq.auto', 'industry.auto'],
-  fitness: ['jobq.fitness', 'industry.fitness'],
-  retail: ['jobq.retail', 'industry.retail'],
-  professional: ['jobq.professional', 'industry.professional'],
-};
+const JOB_SKILLS = ['customer','kitchen','barista','sales','cashier','reception','driving','languages','office','hygiene'];
+const SKILL_INDUSTRY = { restaurant:['customer','kitchen','hygiene'], cafe:['barista','customer','cashier'], beauty:['customer','sales'], clinic:['reception','languages','office'], hotel:['reception','customer','languages'], 'real-estate':['sales','office','languages'], auto:['driving','customer','office'], fitness:['customer','sales'], retail:['sales','cashier','customer'], professional:['office','languages','sales'] };
 function jobLocation() {
   const district = state.jobs.district;
   return district ? `${district}, ${t('jobs.location')}` : t('jobs.location');
@@ -108,8 +98,9 @@ function jobLocation() {
 function jobQuery() {
   const typed = (state.jobs.q || '').trim();
   const industryQ = state.jobs.industryId ? t(`jobq.${state.jobs.industryId}`) : '';
+  const skillQ = (state.jobs.skills || []).map(id => t(`skillq.${id}`)).join(' ');
   const district = state.jobs.district || '';
-  return [typed, industryQ, district, 'İstanbul'].filter(Boolean).join(' ');
+  return [typed, skillQ, industryQ, district, 'İstanbul'].filter(Boolean).join(' ');
 }
 function sourceSearchUrl(src) {
   return src.url(jobQuery() || t('jobs.location'), jobLocation());
@@ -147,7 +138,8 @@ function markSvg() { return '<span class="brand-mark">W</span>'; }
 function brand(home=false) { return `<a class="brand" href="?view=home" data-nav="home">${markSvg()}<span class="brand-word">${esc(t('brand.name'))}<small>${esc(t('brand.tag'))}</small></span></a>`; }
 function navLink(view,label,icon) { return `<button class="side-link ${state.view===view?'active':''}" data-nav="${view}"><span class="nav-icon">${icon}</span><span>${label}</span></button>`; }
 function publicHeader(extraActions='') {
-  return `<header class="public-nav">${brand(true)}<nav class="public-links"><a href="${state.view==='home'?'#nasil-calisir':'?view=home#nasil-calisir'}">${esc(t('nav.how'))}</a><a href="${state.view==='home'?'#sektorler':'?view=home#sektorler'}">${esc(t('nav.industries'))}</a><a href="?view=jobs">${esc(t('nav.jobs'))}</a><a href="${state.view==='home'?'#guven':'?view=home#guven'}">${esc(t('nav.trust'))}</a></nav><div class="public-actions">${langSwitcher()}${extraActions}</div></header>`;
+  const langQ = LANG ? `&lang=${encodeURIComponent(LANG)}` : '';
+  return `<header class="public-nav">${brand(true)}<nav class="public-links"><a href="${state.view==='home'?'#nasil-calisir':`?view=home${langQ}#nasil-calisir`}">${esc(t('nav.how'))}</a><a href="${state.view==='home'?'#sektorler':`?view=home${langQ}#sektorler`}">${esc(t('nav.industries'))}</a><a href="?view=jobs${langQ}">${esc(t('nav.jobs'))}</a><a href="${state.view==='home'?'#guven':`?view=home${langQ}#guven`}">${esc(t('nav.trust'))}</a></nav><div class="public-actions">${langSwitcher()}<button class="btn btn-light btn-jobs-nav" data-nav="jobs">${esc(t('nav.jobs'))}</button>${extraActions}</div></header>`;
 }
 function landing() {
   const topIndustries = INDUSTRIES.slice(0,10);
@@ -159,7 +151,7 @@ function landing() {
       <div class="proof-line">${esc(t('proof'))}</div>
       <section class="section" id="nasil-calisir"><div class="section-head"><div><div class="eyebrow">${esc(t('how.eyebrow'))}</div><h2>${esc(t('how.h2a'))}<br>${esc(t('how.h2b'))}</h2></div><p>${esc(t('how.p'))}</p></div><div class="step-grid"><article class="step-card"><span class="step-num">01</span><h3>${esc(t('how.1t'))}</h3><p>${esc(t('how.1p'))}</p></article><article class="step-card"><span class="step-num">02</span><h3>${esc(t('how.2t'))}</h3><p>${esc(t('how.2p'))}</p></article><article class="step-card"><span class="step-num">03</span><h3>${esc(t('how.3t'))}</h3><p>${esc(t('how.3p'))}</p></article></div></section>
       <section class="section" id="sektorler"><div class="section-head"><div><div class="eyebrow">${esc(t('ind.eyebrow'))}</div><h2>${esc(t('ind.h2a'))}<br>${esc(t('ind.h2b'))}</h2></div><p>${esc(t('ind.p'))}</p></div><div class="industry-grid">${topIndustries.map(x=>`<div class="industry-card"><span class="industry-icon">${x.icon}</span>${esc(industryLabel(x.id))}</div>`).join('')}</div></section>
-      <section class="section" id="is-ilanlari"><div class="section-head"><div><div class="eyebrow">${esc(t('jobs.landingEyebrow'))}</div><h2>${esc(t('jobs.landingH2'))}</h2></div><p>${esc(t('jobs.landingP'))}</p></div><div class="jobs-source-strip">${JOB_SOURCES.map(s=>`<button type="button" class="job-source-pill" data-open-source="${s.id}"><b>${esc(t('src.'+s.id) || s.id)}</b><small>${esc(t('src.'+s.id+'.blurb'))}</small></button>`).join('')}</div><div class="hero-ctas" style="margin-top:18px"><button class="btn" data-nav="jobs">${esc(t('cta.jobsStart'))}</button></div></section>
+      <section class="section" id="is-ilanlari"><div class="section-head"><div><div class="eyebrow">${esc(t('jobs.landingEyebrow'))}</div><h2>${esc(t('jobs.landingH2'))}</h2></div><p>${esc(t('jobs.landingP'))}</p></div><div class="jobs-source-strip">${JOB_SOURCES.map(s=>`<button type="button" class="job-source-pill" data-open-source="${s.id}"><b>${esc(t('src.'+s.id) || s.id)}</b><small>${esc(t('src.'+s.id+'.blurb'))}</small></button>`).join('')}</div><div class="section-head" style="margin-top:28px"><div><div class="eyebrow">${esc(t('jobs.skills'))}</div><h2>${esc(t('jobs.skillsLanding'))}</h2></div><p>${esc(t('jobs.skillsLandingP'))}</p></div><div class="skill-grid">${JOB_SKILLS.map(id=>`<button type="button" class="industry-card" data-skill-go="${id}"><span class="industry-icon">▸</span>${esc(t('skill.'+id))}</button>`).join('')}</div><div class="hero-ctas" style="margin-top:18px"><button class="btn" data-nav="jobs">${esc(t('cta.jobsStart'))}</button></div></section>
       <section class="section" id="guven"><div class="trust-band"><div><h3>${esc(t('trust.h3'))}</h3><p>${esc(t('trust.p'))}</p></div><button class="btn btn-light" data-nav="discover">${esc(t('trust.cta'))}</button></div></section>
     </main><footer class="landing-footer"><span>${esc(t('footer.copy'))}</span><span>${esc(t('footer.note'))}</span></footer></div>`;
 }
@@ -240,24 +232,27 @@ function viewTitle(view) {
 function jobsPanel() {
   const loc = jobLocation();
   const q = jobQuery();
+  const selectedSkills = state.jobs.skills || [];
   const industryOptions = INDUSTRIES.map(i => `<option value="${i.id}" ${state.jobs.industryId===i.id?'selected':''}>${esc(industryLabel(i.id))}</option>`).join('');
   const districtOptions = DISTRICTS.map(d => `<option value="${esc(d)}" ${state.jobs.district===d?'selected':''}>${esc(d)}</option>`).join('');
+  const skillChips = JOB_SKILLS.map(id => `<button type="button" class="select-chip ${selectedSkills.includes(id)?'selected':''}" data-toggle-skill="${id}">${esc(t('skill.'+id))}</button>`).join('');
   const sources = JOB_SOURCES.map(s => {
     const href = sourceSearchUrl(s);
     return `<article class="job-source-card"><div class="job-source-head"><b>${esc(t('src.'+s.id) || s.id)}</b><span class="demo-label">${esc(t('jobs.applyHint'))}</span></div><p>${esc(t('src.'+s.id+'.blurb'))}</p><a class="btn btn-light btn-sm" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(t('jobs.open'))} ↗</a></article>`;
   }).join('');
-  const demoIndustry = state.jobs.industryId || 'restaurant';
-  const sampleQuery = t(`jobq.${demoIndustry}`);
-  const samples = sampleQuery.split(/\s+/).slice(0, 4).map((role, i) => {
-    const href = JOB_SOURCES[i % JOB_SOURCES.length].url(`${role} ${q}`, loc);
-    return `<div class="job-sample"><span class="demo-label">${esc(t('jobs.demo'))}</span><strong>${esc(role)}</strong><small>${esc(industryLabel(demoIndustry))} · ${esc(loc)}</small><a class="btn btn-ghost btn-sm" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(t('jobs.open'))}</a></div>`;
+  const sampleIds = selectedSkills.length ? selectedSkills.slice(0, 4) : (SKILL_INDUSTRY[state.jobs.industryId] || JOB_SKILLS.slice(0, 4));
+  const samples = sampleIds.map((id, i) => {
+    const role = t(`skill.${id}`);
+    const href = JOB_SOURCES[i % JOB_SOURCES.length].url(`${t(`skillq.${id}`)} ${q}`, loc);
+    return `<div class="job-sample"><span class="demo-label">${esc(t('jobs.demo'))}</span><strong>${esc(role)}</strong><small>${esc(loc)}</small><a class="btn btn-ghost btn-sm" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(t('jobs.open'))}</a></div>`;
   }).join('');
   return `${heading(t('jobs.eyebrow'), t('jobs.h1'), t('jobs.p'), `<span class="chip">${esc(t('jobs.count', { n: String(JOB_SOURCES.length) }))}</span>`)}
     <div class="jobs-layout"><aside class="card filter-card"><div class="card-head"><div><h3>${esc(t('jobs.search'))}</h3><p>${esc(t('jobs.sources'))}</p></div></div>
       <div class="form-field"><label>${esc(t('jobs.keyword'))}</label><input class="field" id="jobs-q" value="${esc(state.jobs.q)}" placeholder="${esc(t('search.jobs'))}"></div>
       <div class="form-field" style="margin-top:10px"><label>${esc(t('jobs.industry'))}</label><select class="select" id="jobs-industry"><option value="">${esc(t('jobs.allIndustries'))}</option>${industryOptions}</select></div>
       <div class="form-field" style="margin-top:10px"><label>${esc(t('jobs.district'))}</label><select class="select" id="jobs-district"><option value="">${esc(t('jobs.allDistricts'))}</option>${districtOptions}</select></div>
-      <div style="display:grid;gap:8px;margin-top:14px"><button class="btn" id="run-jobs">${esc(t('jobs.search'))} <span>→</span></button><button class="btn btn-light" id="open-all-jobs">${esc(t('jobs.openAll'))}</button></div>
+      <div class="filter-group"><div class="filter-label">${esc(t('jobs.skills'))}</div><div class="chip-grid">${skillChips}</div><p class="form-hint" style="margin-top:8px">${esc(t('jobs.skillsHint'))}</p></div>
+      <div style="display:grid;gap:8px;margin-top:14px"><button class="btn" id="run-jobs">${esc(t('jobs.search'))} <span>→</span></button><button class="btn btn-light" id="open-all-jobs">${esc(t('jobs.openFirst'))}</button></div>
       <p class="form-hint" style="margin-top:12px">${esc(t('jobs.notice'))}</p></aside>
       <div class="card search-results-card"><div class="card-head"><div><h3>${esc(t('jobs.results'))}</h3><p>${esc(q || t('jobs.empty'))}</p></div></div>
         <div class="search-mode-note">${esc(t('jobs.demoNote'))}</div>
@@ -314,12 +309,24 @@ function bindJobsEvents() {
     state.jobs.district = $('#jobs-district')?.value || '';
   };
   $('#jobs-q')?.addEventListener('change', sync);
-  $('#jobs-industry')?.addEventListener('change', e => { state.jobs.industryId = e.target.value; render(); });
+  $('#jobs-industry')?.addEventListener('change', e => {
+    state.jobs.industryId = e.target.value;
+    if (e.target.value && !(state.jobs.skills || []).length) state.jobs.skills = [...(SKILL_INDUSTRY[e.target.value] || [])];
+    render();
+  });
   $('#jobs-district')?.addEventListener('change', e => { state.jobs.district = e.target.value; render(); });
+  $$('[data-toggle-skill]').forEach(el => el.addEventListener('click', () => {
+    const id = el.dataset.toggleSkill;
+    const cur = new Set(state.jobs.skills || []);
+    if (cur.has(id)) cur.delete(id); else cur.add(id);
+    state.jobs.skills = [...cur];
+    render();
+  }));
   $('#run-jobs')?.addEventListener('click', () => { sync(); state.jobs.ran = true; render(); toast(t('jobs.notice'), 'warn'); });
   $('#open-all-jobs')?.addEventListener('click', () => {
     sync();
-    JOB_SOURCES.forEach((s, i) => setTimeout(() => window.open(sourceSearchUrl(s), '_blank', 'noopener'), i * 250));
+    window.open(sourceSearchUrl(JOB_SOURCES[0]), '_blank', 'noopener');
+    window.open(sourceSearchUrl(JOB_SOURCES[1]), '_blank', 'noopener');
   });
 }
 function bindViewEvents() {
@@ -432,6 +439,7 @@ function bindGlobalEvents() {
   });
   document.addEventListener('click',e=>{
     const langBtn=e.target.closest('[data-lang]'); if(langBtn){ e.preventDefault(); setLang(langBtn.dataset.lang); return; }
+    const skillGo=e.target.closest('[data-skill-go]'); if(skillGo){ const id=skillGo.dataset.skillGo; const cur=new Set(state.jobs.skills||[]); cur.add(id); state.jobs.skills=[...cur]; navigate('jobs'); return; }
     const srcBtn=e.target.closest('[data-open-source]'); if(srcBtn){ const src=JOB_SOURCES.find(s=>s.id===srcBtn.dataset.openSource); if(src) window.open(sourceSearchUrl(src),'_blank','noopener'); return; }
     const logout=e.target.closest('[data-logout]');if(logout){sessionToken='';sessionStorage.removeItem('iwf_session');state.authenticated=false;state.leads=[];state.sites=[];navigate('home');toast(t('logout.ok'));return}
     const nav=e.target.closest('[data-nav]'); if(nav){e.preventDefault();navigate(nav.dataset.nav);return}
