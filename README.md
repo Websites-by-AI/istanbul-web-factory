@@ -1,6 +1,6 @@
 # İstanbul Web Atölyesi
 
-Türkçe bir İstanbul lead-discovery ve web taslağı MVP'si. Ana sayfa, İstanbul işletmelerini anında keşfetme ve her uygun işletmeye ücretsiz, işletmeye özel ilk web sitesi taslağı sunma akışını anlatır.
+İstanbul lead-discovery ve web taslağı MVP'si. Arayüz 10 dilde çalışır (Türkçe, English, فارسی, العربية, Русский, Deutsch, Français, Kurdî, Azərbaycan, Українська); فارسی ve العربية sağdan sola (RTL) açılır. Ana sayfa işletme keşfini anlatır; **İş bul** akışı Indeed, LinkedIn, Kariyer.net ve diğer resmi board’lara yönlendirir — ilan kazıması yoktur.
 
 **Ücretsiz teklifin kapsamı:** tek sayfalık ilk taslak ve paylaşılabilir önizleme. Domain, kalıcı hosting, yayına alma ve bakım dahil değildir; ayrıca sunulacaksa kapsam/ücret önceden açıklanmalı ve işletme sahibi onaylamalıdır.
 
